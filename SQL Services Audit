@@ -1,0 +1,6 @@
+select @@servername as ServerName, servicename, status_desc, last_startup_time 
+from sys.dm_server_services
+
+SELECT servicename, service_account
+FROM sys.dm_server_services
+GO
