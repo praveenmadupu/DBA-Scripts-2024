@@ -1,0 +1,33 @@
+Use EVENT_PUBLISHER 
+go
+declare @DBSizeMb as bigint
+declare @ShrinkbyMb as int = 100
+Declare @DatabaseFile as varchar(200) = 'File_Name'
+Declare @TargetShrinkSizeMb as bigint = 100 -- Put here size
+SELECT
+@DBSizeMb = (s.size * CONVERT(float,8))/1024
+FROM
+sys.filegroups AS g
+INNER JOIN sys.master_files AS s ON ((s.type = 2 or s.type = 0) and s.database_id = db_id() and (s.drop_lsn IS NULL)) AND (s.data_space_id=g.data_space_id)
+
+while @DbSizeMB > @TargetShrinkSizeMb
+
+Begin
+
+Print @DbSizeMb - @ShrinkbyMb
+
+declare @execstatement as varchar(200)
+set @execstatement = 'DBCC SHRINKFILE (N''' + @DatabaseFile +''' ,' + cast( (@DbSizeMb - @ShrinkbyMb) as varchar(100)) +');'
+
+print @ExecStatement
+print Getdate()
+EXEC( @ExecStatement)
+
+WAITFOR DELAY '00:00:10';
+
+SELECT
+@DBSizeMb = (s.size * CONVERT(float,8))/1024
+FROM
+sys.filegroups AS g
+INNER JOIN sys.master_files AS s ON ((s.type = 2 or s.type = 0) and s.database_id = db_id() and (s.drop_lsn IS NULL)) AND (s.data_space_id=g.data_space_id)
+End
