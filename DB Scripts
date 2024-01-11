@@ -1,0 +1,388 @@
+--find the account(s) under which the SQL Server Service is running.
+--https://alwayssql.wordpress.com/2017/09/04/query-to-find-the-accounts-under-which-the-sql-server-service-is-running/
+
+
+Select 
+servicename,
+startup_type_desc,
+status_desc,
+process_id,
+last_startup_time,
+service_account,
+filename,
+is_clustered,
+cluster_nodename from sys.dm_server_services
+
+--Script to check currently Running Queries on the server – T-SQL
+--https://alwayssql.wordpress.com/2018/01/24/sql-server-script-to-check-currently-running-queries-on-the-server-t-sql/
+
+
+SELECT 
+[Session ID]    =r.session_id,
+[Session_status]=r.status,
+[Database]          = ISNULL(db_name(r.database_id), N''),
+[Command]           = ISNULL(r.command, N''),
+[statement_text]    = Substring(st.TEXT, (r.statement_start_offset / 2) + 1, 
+                    (
+                    (
+                    CASE r.statement_end_offset
+                    WHEN - 1
+                    THEN Datalength(st.TEXT)
+                    ELSE r.statement_end_offset
+                    END - r.statement_start_offset
+                    ) / 2
+                    ) + 1),
+[command_text]      =Coalesce(Quotename(Db_name(st.dbid)) + N'.' + Quotename(Object_schema_name(st.objectid, st.dbid)) + N'.' + Quotename(Object_name(st.objectid, st.dbid)), ''),
+[Total CPU (ms)]    = r.cpu_time,
+[Elapsed Time (in Sec)]= r.total_elapsed_time / (1000.0) 
+FROM sys.dm_exec_requests r
+CROSS APPLY sys.dm_exec_sql_text(sql_handle) AS st
+
+--current tempdb configuration
+--https://alwayssql.wordpress.com/2018/10/04/sql-server-script-to-configure-tempdb-files-as-per-number-of-logical-processors/
+
+use tempdb
+go
+SELECT 
+    [TYPE] = A.TYPE_DESC
+    ,[FILE_Name] = A.name
+    ,[FILEGROUP_NAME] = fg.name
+    ,[File_Location] = A.PHYSICAL_NAME
+    ,[FILESIZE_MB] = CONVERT(DECIMAL(10,2),A.SIZE/128.0)
+    ,[USEDSPACE_MB] = CONVERT(DECIMAL(10,2),A.SIZE/128.0 - ((SIZE/128.0) - CAST(FILEPROPERTY(A.NAME, 'SPACEUSED') AS INT)/128.0))
+    ,[FREESPACE_MB] = CONVERT(DECIMAL(10,2),A.SIZE/128.0 - CAST(FILEPROPERTY(A.NAME, 'SPACEUSED') AS INT)/128.0)
+    ,[FREESPACE_%] = CONVERT(DECIMAL(10,2),((A.SIZE/128.0 - CAST(FILEPROPERTY(A.NAME, 'SPACEUSED') AS INT)/128.0)/(A.SIZE/128.0))*100)
+    ,[AutoGrow] = 'By ' + CASE is_percent_growth WHEN 0 THEN CAST(growth/128 AS VARCHAR(10)) + ' MB -' 
+        WHEN 1 THEN CAST(growth AS VARCHAR(10)) + '% -' ELSE '' END 
+        + CASE max_size WHEN 0 THEN 'DISABLED' WHEN -1 THEN ' Unrestricted' 
+            ELSE ' Restricted to ' + CAST(max_size/(128*1024) AS VARCHAR(10)) + ' GB' END 
+        + CASE is_percent_growth WHEN 1 THEN ' [autogrowth by percent, BAD setting!]' ELSE '' END
+FROM sys.database_files A LEFT JOIN sys.filegroups fg ON A.data_space_id = fg.data_space_id 
+order by  filegroup_NAME; 
+go
+
+--Activity Monitor’s Script
+--https://alwayssql.wordpress.com/2017/08/01/activity-monitors-script-t-sql/
+
+SELECT
+   [Session ID]    = s.session_id,
+   [User Process]  = CONVERT(CHAR(1), s.is_user_process),
+   [Login]         = s.login_name,  
+   [Blocked By]    = ISNULL(CONVERT (varchar, w.blocking_session_id), ''),
+   [Head Blocker]  =
+        CASE
+            -- session has an active request, is blocked, but is blocking others or session is idle but has an open tran and is blocking others
+            WHEN r2.session_id IS NOT NULL AND (r.blocking_session_id = 0 OR r.session_id IS NULL) THEN '1'
+            -- session is either not blocking someone, or is blocking someone but is blocked by another party
+            ELSE ''
+        END,
+
+   [Database]       = ISNULL(db_name(r.database_id), N''),
+   [Task State]     = ISNULL(t.task_state, N''),
+   [Session_Status] = s.status, 
+   [Command]        = ISNULL(r.command, N''),
+   [statement_text] = Substring(st.TEXT, (r.statement_start_offset / 2) + 1, (
+            (
+                CASE r.statement_end_offset
+                    WHEN - 1
+                        THEN Datalength(st.TEXT)
+                    ELSE r.statement_end_offset
+                    END - r.statement_start_offset
+                ) / 2
+            ) + 1),
+
+    [command_text]   = Coalesce(Quotename(Db_name(st.dbid)) + N'.' + Quotename(Object_schema_name(st.objectid, st.dbid)) + N'.' + Quotename(Object_name(st.objectid, st.dbid)), ''),
+    [Total CPU (ms)] = s.cpu_time,
+    r.total_elapsed_time / (1000.0) as 'Elapsed Time (in Sec)',
+    [Wait Time (ms)] = ISNULL(w.wait_duration_ms, 0), 
+    [Wait Type]      = ISNULL(w.wait_type, N''),
+    [Wait Resource]  = ISNULL(w.resource_description, N''),
+    [Total Physical I/O (MB)]   = (s.reads + s.writes) * 8 / 1024,
+    [transaction_isolation] = case s.transaction_isolation_level when 0 then 'Unspecified'
+                                                                 when 1 then 'ReadUncomitted'
+                                                                 when 2 then 'ReadCommitted'
+                                                                 when 3 then 'RepeatableRead'
+                                                                 when 4 then 'Serializable'
+                                                                 when 5 then 'Snapshot'
+                                                                 End ,
+    [Memory Use (KB)]  = s.memory_usage * 8192 / 1024,
+    --[Open Transactions] = ISNULL(r.open_transaction_count,0),
+    --[Login Time]    = s.login_time,
+    --[Last Request Start Time] = s.last_request_start_time,
+    [Host Name]     = ISNULL(s.host_name, N''),
+    [Net Address]   = ISNULL(c.client_net_address, N''),
+    --[Execution Context ID] = ISNULL(t.exec_context_id, 0),
+    --[Request ID] = ISNULL(r.request_id, 0),
+    --[Workload Group] = N'',
+    [Application]   = ISNULL(s.program_name, N'')
+
+FROM sys.dm_exec_sessions s LEFT OUTER JOIN sys.dm_exec_connections c ON (s.session_id = c.session_id)
+LEFT OUTER JOIN sys.dm_exec_requests r ON (s.session_id = r.session_id)
+LEFT OUTER JOIN sys.dm_os_tasks t ON (r.session_id = t.session_id AND r.request_id = t.request_id)
+LEFT OUTER JOIN
+(
+    -- In some cases (e.g. parallel queries, also waiting for a worker), one thread can be flagged as
+    -- waiting for several different threads.  This will cause that thread to show up in multiple rows
+    -- in our grid, which we don't want.  Use ROW_NUMBER to select the longest wait for each thread,
+    -- and use it as representative of the other wait relationships this thread is involved in.
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY waiting_task_address ORDER BY wait_duration_ms DESC) AS row_num
+    FROM sys.dm_os_waiting_tasks
+) w ON (t.session_id = w.session_id) AND w.row_num = 1
+LEFT OUTER JOIN sys.dm_exec_requests r2 ON (r.session_id = r2.blocking_session_id)
+--LEFT OUTER JOIN sys.dm_resource_governor_workload_groups g ON (g.group_id = s.group_id)--TAKE THIS dmv OUT TO WORK IN 2005
+--LEFT OUTER JOIN sys.sysprocesses p ON (s.session_id = p.spid)
+OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) AS st
+WHERE s.session_Id > 50              -- Ignore system spids.
+--and db_name(r.database_id) = 'YourDatabaseName' --to filter DBName
+ORDER BY  s.session_Id --[Total CPU (ms)] desc ; 
+
+
+--SQL Server Agent (Job Related) Information:
+--https://alwayssql.wordpress.com/2017/07/11/script-to-get-the-sql-server-agent-job-related-information/
+
+use msdb
+go
+SELECT 
+    [sJOB].[name] AS [JobName]
+    , [sDBP].[name] AS [JobOwner]
+    , [sCAT].[name] AS [JobCategory]
+    , [sJOB].[description] AS [JobDescription]
+    , [sJSTP].[step_id] AS [JobStartStepNo]
+    , [sJSTP].[step_name] AS [JobStartStepName]
+    , [sJOB].[date_created] AS [JobCreatedOn]
+    , [sJOB].[date_modified] AS [JobLastModifiedOn]
+    , CASE [sJOB].[enabled]
+        WHEN 1 THEN 'Yes'
+        WHEN 0 THEN 'No'
+      END AS [IsEnabled]
+         , CASE
+            WHEN [sSCH].[schedule_uid] IS NULL THEN 'No'
+            ELSE 'Yes'
+            END AS [IsScheduled]
+      , CASE 
+        WHEN [freq_type] = 64 THEN 'Start automatically when SQL Server Agent starts'
+        WHEN [freq_type] = 128 THEN 'Start whenever the CPUs become idle'
+        WHEN [freq_type] IN (4,8,16,32) THEN 'Recurring'
+        WHEN [freq_type] = 1 THEN 'One Time'
+      END [ScheduleType]
+    , CASE [freq_type]
+        WHEN 1 THEN 'One Time'
+        WHEN 4 THEN 'Daily'
+        WHEN 8 THEN 'Weekly'
+        WHEN 16 THEN 'Monthly'
+        WHEN 32 THEN 'Monthly - Relative to Frequency Interval'
+        WHEN 64 THEN 'Start automatically when SQL Server Agent starts'
+        WHEN 128 THEN 'Start whenever the CPUs become idle'
+      END [Occurrence]
+    , CASE [freq_type]
+        WHEN 4 THEN 'Occurs every ' + CAST([freq_interval] AS VARCHAR(3)) + ' day(s)'
+        WHEN 8 THEN 'Occurs every ' + CAST([freq_recurrence_factor] AS VARCHAR(3)) 
+                    + ' week(s) on '
+                    + CASE WHEN [freq_interval] & 1 = 1 THEN 'Sunday' ELSE '' END
+                    + CASE WHEN [freq_interval] & 2 = 2 THEN ', Monday' ELSE '' END
+                    + CASE WHEN [freq_interval] & 4 = 4 THEN ', Tuesday' ELSE '' END
+                    + CASE WHEN [freq_interval] & 8 = 8 THEN ', Wednesday' ELSE '' END
+                    + CASE WHEN [freq_interval] & 16 = 16 THEN ', Thursday' ELSE '' END
+                    + CASE WHEN [freq_interval] & 32 = 32 THEN ', Friday' ELSE '' END
+                    + CASE WHEN [freq_interval] & 64 = 64 THEN ', Saturday' ELSE '' END
+        WHEN 16 THEN 'Occurs on Day ' + CAST([freq_interval] AS VARCHAR(3)) 
+                     + ' of every '
+                     + CAST([freq_recurrence_factor] AS VARCHAR(3)) + ' month(s)'
+        WHEN 32 THEN 'Occurs on '
+                     + CASE [freq_relative_interval]
+                        WHEN 1 THEN 'First'
+                        WHEN 2 THEN 'Second'
+                        WHEN 4 THEN 'Third'
+                        WHEN 8 THEN 'Fourth'
+                        WHEN 16 THEN 'Last'
+                       END
+                     + ' ' 
+                     + CASE [freq_interval]
+                        WHEN 1 THEN 'Sunday'
+                        WHEN 2 THEN 'Monday'
+                        WHEN 3 THEN 'Tuesday'
+                        WHEN 4 THEN 'Wednesday'
+                        WHEN 5 THEN 'Thursday'
+                        WHEN 6 THEN 'Friday'
+                        WHEN 7 THEN 'Saturday'
+                        WHEN 8 THEN 'Day'
+                        WHEN 9 THEN 'Weekday'
+                        WHEN 10 THEN 'Weekend day'
+                       END
+                     + ' of every ' + CAST([freq_recurrence_factor] AS VARCHAR(3)) 
+                     + ' month(s)'
+      END AS [Recurrence]
+    , CASE [freq_subday_type]
+        WHEN 1 THEN 'Occurs once at ' 
+                    + STUFF(
+                 STUFF(RIGHT('000000' + CAST([active_start_time] AS VARCHAR(6)), 6)
+                                , 3, 0, ':')
+                            , 6, 0, ':')
+        WHEN 2 THEN 'Occurs every ' 
+                    + CAST([freq_subday_interval] AS VARCHAR(3)) + ' Second(s) between ' 
+                    + STUFF(
+                   STUFF(RIGHT('000000' + CAST([active_start_time] AS VARCHAR(6)), 6)
+                                , 3, 0, ':')
+                            , 6, 0, ':')
+                    + ' & ' 
+                    + STUFF(
+                    STUFF(RIGHT('000000' + CAST([active_end_time] AS VARCHAR(6)), 6)
+                                , 3, 0, ':')
+                            , 6, 0, ':')
+        WHEN 4 THEN 'Occurs every ' 
+                    + CAST([freq_subday_interval] AS VARCHAR(3)) + ' Minute(s) between ' 
+                    + STUFF(
+                   STUFF(RIGHT('000000' + CAST([active_start_time] AS VARCHAR(6)), 6)
+                                , 3, 0, ':')
+                            , 6, 0, ':')
+                    + ' & ' 
+                    + STUFF(
+                    STUFF(RIGHT('000000' + CAST([active_end_time] AS VARCHAR(6)), 6)
+                                , 3, 0, ':')
+                            , 6, 0, ':')
+        WHEN 8 THEN 'Occurs every ' 
+                    + CAST([freq_subday_interval] AS VARCHAR(3)) + ' Hour(s) between ' 
+                    + STUFF(
+                    STUFF(RIGHT('000000' + CAST([active_start_time] AS VARCHAR(6)), 6)
+                                , 3, 0, ':')
+                            , 6, 0, ':')
+                    + ' & ' 
+                    + STUFF(
+                    STUFF(RIGHT('000000' + CAST([active_end_time] AS VARCHAR(6)), 6)
+                                , 3, 0, ':')
+                            , 6, 0, ':')
+      END [Frequency]
+
+    , [sSCH].[name] AS [JobScheduleName]
+    --,[sJSTP].database_name
+     , Last_Run = CONVERT(DATETIME, RTRIM(run_date) + ' '
+        + STUFF(STUFF(REPLACE(STR(RTRIM(h.run_time),6,0),
+        ' ','0'),3,0,':'),6,0,':'))
+    , case [sJSTP].last_run_outcome
+            When 0 then 'Failed'
+            when 1 then 'Succeeded'
+            When 2 then 'Retry'
+            When 3 then 'Canceled'
+            When 5 then 'Unknown'
+     End as Last_Run_Status
+
+    ,Last_Run_Duration_HHMMSS = STUFF(STUFF(REPLACE(STR([sJSTP].last_run_duration,7,0),
+        ' ','0'),4,0,':'),7,0,':')
+    , Max_Duration = STUFF(STUFF(REPLACE(STR(l.run_duration,7,0),
+        ' ','0'),4,0,':'),7,0,':')
+    , Next_Run= CONVERT(DATETIME, RTRIM(NULLIF([sJOBSCH].next_run_date, 0)) + ' '
+        + STUFF(STUFF(REPLACE(STR(RTRIM([sJOBSCH].next_run_time),6,0),
+        ' ','0'),3,0,':'),6,0,':'))
+    , CASE [sJOB].[delete_level]
+        WHEN 0 THEN 'Never'
+        WHEN 1 THEN 'On Success'
+        WHEN 2 THEN 'On Failure'
+        WHEN 3 THEN 'On Completion'
+      END AS [JobDeletionCriterion]
+
+    , [sSVR].[name] AS [OriginatingServerName]
+    ,[sJSTP].subsystem
+    ,[sJSTP].command
+    ,h.message
+
+FROM
+    [msdb].[dbo].[sysjobs] AS [sJOB]
+    LEFT JOIN [msdb].[sys].[servers] AS [sSVR]
+        ON [sJOB].[originating_server_id] = [sSVR].[server_id]
+    LEFT JOIN [msdb].[dbo].[syscategories] AS [sCAT]
+        ON [sJOB].[category_id] = [sCAT].[category_id]
+    LEFT JOIN [msdb].[dbo].[sysjobsteps] AS [sJSTP]
+        ON [sJOB].[job_id] = [sJSTP].[job_id]
+        AND [sJOB].[start_step_id] = [sJSTP].[step_id]
+    LEFT JOIN [msdb].[sys].[database_principals] AS [sDBP]
+        ON [sJOB].[owner_sid] = [sDBP].[sid]
+    LEFT JOIN [msdb].[dbo].[sysjobschedules] AS [sJOBSCH]
+        ON [sJOB].[job_id] = [sJOBSCH].[job_id]
+    LEFT JOIN [msdb].[dbo].[sysschedules] AS [sSCH]
+        ON [sJOBSCH].[schedule_id] = [sSCH].[schedule_id]
+
+        left JOIN
+    (
+        SELECT job_id, instance_id = MAX(instance_id),max(run_duration) AS run_duration
+            FROM msdb.dbo.sysjobhistory
+            GROUP BY job_id
+    ) AS l
+    ON sJOB.job_id = l.job_id
+left JOIN
+    msdb.dbo.sysjobhistory AS h
+    ON h.job_id = l.job_id
+    AND h.instance_id = l.instance_id
+ORDER BY [JobName]
+
+
+--Database Restore information
+--https://alwayssql.wordpress.com/2018/03/30/script-to-get-the-sql-server-database-restore-information/
+
+WITH MostRecentRestore AS
+(
+SELECT 
+RowNum = ROW_NUMBER() OVER (PARTITION BY RH.Destination_database_name ORDER BY RH.Restore_Date DESC),
+RH.Restore_date, 
+BS.[database_name] as Source_Database, 
+RH.Destination_Database_Name, 
+BS.Backup_Start_Date, 
+BS.Backup_Finish_Date, 
+CASE WHEN RH.restore_type = 'D' THEN 'Database'
+  WHEN RH.restore_type = 'F' THEN 'File'
+  WHEN RH.restore_type = 'G' THEN 'Filegroup'
+  WHEN RH.restore_type = 'I' THEN 'Differential'
+  WHEN RH.restore_type = 'L' THEN 'Log'
+  WHEN RH.restore_type = 'V' THEN 'Verifyonly'
+  WHEN RH.restore_type = 'R' THEN 'Revert'
+  ELSE RH.restore_type 
+END AS Restore_Type,
+RH.[Replace],
+RH.[Recovery],
+RH.Restore_Date AS Restored_On,
+BMF.physical_device_name AS Restored_From,
+RF.destination_phys_name AS Current_DB_File_Location,
+RH.user_name AS Restored_By,
+BS.machine_name,
+BS.Server_Name
+FROM msdb.dbo.RestoreHistory RH 
+INNER JOIN msdb.dbo.BackupSet BS ON RH.backup_set_id = BS.backup_set_id
+INNER JOIN msdb.dbo.restorefile RF ON RH.Restore_History_id = RF.Restore_History_id
+INNER JOIN msdb.dbo.Backupmediafamily BMF ON bs.media_set_id = bmf.media_set_id
+)
+SELECT *
+FROM MostRecentRestore
+WHERE [RowNum] = 1 AND destination_database_name = 'YourDatabaseName'
+
+
+--Active Sessions
+--https://blog.sqlauthority.com/2014/08/24/sql-server-how-to-see-active-sql-server-connections-for-database/
+
+SELECT DB_NAME(dbid) AS DBName,
+COUNT(dbid) AS NumberOfConnections,
+loginame
+FROM    sys.sysprocesses
+GROUP BY dbid, loginame
+ORDER BY DB_NAME(dbid)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
