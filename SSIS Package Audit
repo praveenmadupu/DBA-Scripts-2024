@@ -1,0 +1,52 @@
+--script for getting the list of SSIS packages which stored in MSDB database of SQL Server.
+--This script will help DBA for finding the SSIS packages in SQL Server.
+--https://www.dbrnd.com/2018/01/sql-server-script-to-get-the-ssis-packages-of-msdb/
+
+Below is a T-SQL Script:
+SELECT  
+	ssisp.name AS package_name
+	,ssisp.description
+	,ssispf.foldername as folder_name
+	,CASE ssisp.packagetype
+		WHEN 0 THEN 'Default client'
+		WHEN 1 THEN 'I/O Wizard'
+		WHEN 2 THEN 'DTS Designer'
+		WHEN 3 THEN 'Replication'
+		WHEN 5 THEN 'SSIS Designer'
+		WHEN 6 THEN 'Maintenance Plan'
+	ELSE 'Unknown'
+	END AS package_type
+	,c.name AS owner_name 
+	,ssisp.createdate AS create_date 
+	,DATALENGTH(ssisp.packagedata) AS package_size
+FROM msdb.dbo.sysssispackages AS ssisp 
+INNER JOIN msdb.dbo.sysssispackagefolders AS ssispf
+	ON ssisp.folderid = ssispf.folderid
+INNER JOIN sys.syslogins AS c 
+	ON ssisp.ownersid = c.sid
+ORDER BY ssisp.name
+
+--https://www.techbrothersit.com/2013/07/ssis-2012-how-to-get-list-of-ssis.html
+
+SQL Server 2012, provide two system tables in MSDB database those can be used to answer our question.
+1.  [dbo].[sysssispackages]
+2.  [dbo].[sysssispackagefolders]
+
+Dbo.sysssispackages table will provide information about SSIS Package such as name, description,package createdate, foloderid (so we can join with sysssispackagefolders to get folder name) and other columns.
+
+Dbo.sysssispackagefolder will provide us the folder name, folderid and parentfolderid. We can join above tables and get Packages with Folder information.
+
+SELECT f.foldername            AS FolderName,
+       p.name                  AS PackageName,
+       p.description           AS [Description],
+       P.createdate            AS PackageCreateDate,
+       Suser_sname(p.ownersid) AS OwnerName,
+       CASE
+         WHEN p.isencrypted = 0 THEN 'N'
+         ELSE 'Y'
+       END                     AS [IsEncrypted]
+FROM   [dbo].[sysssispackages] p
+       INNER JOIN [dbo].[sysssispackagefolders] f
+               ON p.folderid = f.folderid
+
+
