@@ -1,0 +1,11 @@
+select ag.name, agl.dns_name, agl.port, agl.ip_configuration_string_from_cluster 
+from 
+sys.availability_group_listeners agl
+join sys.availability_groups ag 
+ON ag.group_id = agl.group_id
+
+select dns_name, port, ip_configuration_string_from_cluster 
+from sys.availability_group_listeners  
+
+select ip_address, network_subnet_ip, state_desc 
+from sys.availability_group_listener_ip_addresses  
