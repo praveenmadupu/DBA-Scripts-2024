@@ -1,0 +1,118 @@
+--Audit SQL Server Permissions
+-- https://petersonamerican.com/sql-server-audit-script
+
+SET NOCOUNT ON
+go
+SELECT @@servername AS 'ServerName', 
+--sid, 
+name, 
+CASE hasaccess    WHEN 1 THEN 'Yes' ELSE '   ' END AS 'HasAccess',
+CASE sysadmin       WHEN 1 THEN 'Yes' ELSE '   ' END AS 'SysAdmin',
+CASE securityadmin WHEN 1 THEN 'Yes' ELSE '   ' END AS 'SecAdmin' ,
+CASE serveradmin    WHEN 1 THEN 'Yes' ELSE '   ' END AS 'SrvrAdmn',
+CASE setupadmin     WHEN 1 THEN 'Yes' ELSE '   ' END AS 'setupadmin',
+CASE processadmin   WHEN 1 THEN 'Yes' ELSE '   ' END AS 'processadmin',
+CASE diskadmin      WHEN 1 THEN 'Yes' ELSE '   ' END AS 'diskadmin',
+CASE dbcreator      WHEN 1 THEN 'Yes' ELSE '   ' END AS 'dbcreator',
+CASE bulkadmin      WHEN 1 THEN 'Yes' ELSE '   ' END AS 'bulkadmin' 
+INTO ##AuditTable
+  FROM master.dbo.syslogins
+  WHERE name NOT LIKE '##%'
+
+ --SELECT * FROM ##AuditTable
+
+DECLARE @SQLOut VARCHAR(1000) 
+DECLARE @ColNbr INT
+
+SET @ColNbr = 1
+
+WHILE @ColNbr < 76
+BEGIN
+
+SET @SQLOut = 'ALTER TABLE ##AuditTable ADD DB'+ Convert(varchar(2), @ColNbr) + ' sysname'
+EXEC (@SQLOut)
+SET @SQLOut = 'UPDATE ##AuditTable SET DB'+ Convert(varchar(2), @ColNbr) + '= '' ''' 
+EXEC (@SQLOut)
+
+SET @ColNbr = @ColNbr + 1
+
+end
+
+DECLARE @User       sysname
+DECLARE @HasAccess  VARCHAR(25)
+--DECLARE @SQLOut VARCHAR(100) 
+--DECLARE @ColNbr INT
+DECLARE @DBName sysname
+DECLARE @DBNbr INT
+
+DECLARE DBCursor CURSOR
+FOR
+SELECT name, dbid
+  FROM master.dbo.sysdatabases
+WHERE name NOT IN ('tempdb')
+  AND status NOT IN (65568, 48, 512, 256, 128, 64, 528, 32, 66048, 66056)
+
+OPEN DBCursor
+
+FETCH DBCursor
+INTO @DBName, @DBNbr
+
+WHILE @@Fetch_Status = 0
+ 
+   BEGIN 
+
+SET @SQLOut = 'UPDATE ##AuditTable SET DB'+ Convert(varchar(2), @DBNbr) + '= ''' + @DBName +  ''' Where name = ''sa''' 
+EXEC (@SQLOut)
+
+--  DECLARE @SQLOut VARCHAR(100), @DBName sysname;       set @DBName = 'master'   
+
+SET @SQLOut = 'DECLARE UserCursor CURSOR  '
++ 'FOR '
++ 'SELECT memberprinc.[name], roleprinc.[name]     '
++ 'FROM [' + @DBName + ']' + '.sys.database_role_members members '
++ 'JOIN [' + @DBName + ']' + '.sys.database_principals roleprinc ON roleprinc.[principal_id] = members.[role_principal_id] '
++ 'JOIN [' + @DBName + ']' + '.sys.database_principals memberprinc ON memberprinc.[principal_id] = members.[member_principal_id] '
++ 'WHERE (memberprinc.[name] NOT LIKE ''db_%'' and memberprinc.[name] != ''sa'')'
+EXEC (@SQLOut)
+
+OPEN UserCursor
+
+FETCH UserCursor
+ INTO @User, @HasAccess
+
+WHILE @@fetch_status = 0
+BEGIN
+SET @ColNbr = @DBNbr
+
+SET @SQLOut = 'UPDATE ##AuditTable SET DB' 
++ CONVERT(VARCHAR(3), @ColNbr) 
++ ' = ' 
++ ISNULL('DB' + CONVERT(VARCHAR(3), @ColNbr), ', ') 
++ '+ ''' + @HasAccess + ','''
++ ' WHERE name = ''' 
++ @User + ''''
+ 
+--print @SQLOut
+EXEC(@SQLOut)
+
+FETCH UserCursor
+   INTO @User, @HasAccess
+
+end 
+
+CLOSE UserCursor
+DEALLOCATE UserCursor
+
+FETCH DBCursor
+INTO @DBName, @DBNbr
+
+END   
+
+CLOSE DBCursor
+DEALLOCATE DBCursor
+
+ SELECT * FROM ##AuditTable
+go
+
+ DROP TABLE ##AuditTable
+ GO
