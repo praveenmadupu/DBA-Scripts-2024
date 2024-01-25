@@ -1,0 +1,9 @@
+DECLARE @Domain varchar(100), @key varchar(100)
+
+SET @key = 'SYSTEM\ControlSet001\Services\Tcpip\Parameters\'
+EXEC master..xp_regread @rootkey='HKEY_LOCAL_MACHINE', @key=@key,@value_name='Domain',@value=@Domain OUTPUT
+SELECT 'Server Name: '+@@servername + ' Domain Name:'+convert(varchar(100),@Domain)
+
+Alternative ways,
+1. SELECT DEFAULT_DOMAIN()
+2. EXEC Master.dbo.xp_LoginConfig 'Default Domain'
