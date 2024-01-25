@@ -1,0 +1,22 @@
+
+--T-SQL Script to identify the last restored Log backup file of the Secondary database in the SQL Server Log Shipping.
+--Error Messages:
+   -- “.trn is too recent to apply to the secondary database”
+   -- “Could not find a log backup file that could be applied to secondary database”
+
+-- Below T-SQL script, you can find last restored log backup in the Secondary Database 
+-- which help you to compare with available log backups of Primary Database.
+-- You can also easily find out any pending restore of log backup.
+
+SELECT
+	[lss].[primary_database]
+	,[lss].[last_copied_file]
+	,[lss].[last_copied_date]
+	,[lssd].[secondary_database]
+	,[lssd].[last_restored_file]
+	,[lssd].[last_restored_date]
+FROM [msdb].[dbo].[log_shipping_secondary] AS lss
+INNER JOIN [msdb].[dbo].[log_shipping_secondary_databases] AS lssd
+        ON [lss].[primary_database] = [lssd].[secondary_database]
+WHERE [lss].[primary_database] ='Primary_Database_Name'
+ORDER BY [lss].[primary_database]
