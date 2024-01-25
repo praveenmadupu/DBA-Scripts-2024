@@ -1,0 +1,30 @@
+USE msdb
+
+GO
+
+SELECT
+destination_database_name AS DBRestored ,
+restore_date AS RestoreDate ,
+RH.USER_NAME AS RestoredBY,
+BS.name AS BackupName,
+BS.USER_NAME AS DBBackedUpBY,
+BS.server_name SourceServerName,
+BackupType= CASE
+                       when BS.type='D'  Then 'Database '
+                       when BS.type='I'   Then 'Differential database'
+                       when BS.type='L'  Then 'Log'
+                       when BS.type='F'  Then 'File or filegroup'
+                       when BS.type='G'  Then 'Differential file'
+                       when BS.type='P'  Then 'Partial '
+                       when BS.type='Q'  Then 'Differential partial '
+END,
+BS.database_name AS SourceDB,
+physical_name AS SourceFile,
+backup_start_date AS BackupDate
+FROM RestoreHistory RH
+INNER JOIN BackupSet BS
+ON RH.backup_set_id = BS.backup_set_id
+INNER JOIN BackupFile BKF
+ON BKF.backup_set_id = BS.backup_set_id
+WHERE destination_database_name='pubs'
+ORDER BY RestoreDate
